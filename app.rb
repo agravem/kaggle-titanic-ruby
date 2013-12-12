@@ -1,47 +1,54 @@
 require 'csv'
-require 'awesome_print'
 
-class Passenger < Struct.new(:id, :gender, :alive)
+class Castaway < Struct.new(:id, :gender, :survived)
+end
+
+class Passenger < Struct.new(:id, :gender, :survival_chance)
+end
+
+castaways = []
+CSV.foreach('./data/train.csv') do |row|
+  next if row[0] == "PassengerId"
+  id        = row[0]
+  gender    = row[4] == 'male' ? 'M' : 'F'
+  survived  = row[1] == '0' ? false : true
+  castaways << Castaway.new(id, gender, survived)
 end
 
 passengers = []
-CSV.foreach('./data/train.csv') do |row|
-  next if row[0] == "PassengerId"
-  id      = row[0]
-  gender  = row[4] == 'male' ? 'M' : 'F'
-  alive   = row[1] == '0' ? false : true
-  passengers << Passenger.new(id, gender, alive)
-end
-
-test = []
 CSV.foreach('./data/test.csv') do |row|
   next if row[0] == "PassengerId"
   id      = row[0]
   gender  = row[3] == 'male' ? 'M' : 'F'
-  test << Passenger.new(id, gender)  
+  passengers << Passenger.new(id, gender, 1)  
 end
 
-male_passengers   = passengers.select {|p| p.gender == 'M' }.size
-female_passengers = passengers.select {|p| p.gender == 'F' }.size
+class GenderPredictor
+  def initialize(castaways)
+    male_passengers   = castaways.select {|p| p.gender == 'M' }.size
+    male_survivors    = castaways.select {|p| p.survived && p.gender == 'M' }.size
+    @msr  = male_survivors.to_f/male_passengers.to_f
 
-male_survivors    = passengers.select {|p| p.alive && p.gender == 'M' }.size
-female_survivors  = passengers.select {|p| p.alive && p.gender == 'F' }.size
+    female_passengers = castaways.select {|p| p.gender == 'F' }.size
+    female_survivors  = castaways.select {|p| p.survived && p.gender == 'F' }.size
+    @fsr  = female_survivors.to_f/female_passengers.to_f    
+  end
 
-msr  = male_survivors.to_f/male_passengers.to_f
-fsr  = female_survivors.to_f/female_passengers.to_f
-
-def survived(passenger, m, f)
-  if passenger.gender == 'M' && m > 0.70
-    true
-  elsif passenger.gender == 'F' && f > 0.70
-    true
-  else
-    false
+  def exec(passenger)
+    survival_chance = case passenger.gender
+    when 'M'
+      @msr * passenger.survival_chance
+    when 'F'
+      @fsr * passenger.survival_chance
+    end
+    Passenger.new(passenger.id, passenger.gender, survival_chance)
   end
 end
 
-result = test.map do |p|
-  "#{survived(p, msr, fsr) ? 1 : 0},#{p.id}"
-end
+gender_predictor = GenderPredictor.new(castaways)
 
-File.write('data/submition.csv', "Survived,PassengerId\n" + result.join("\n") + "\n")
+csv = passengers.map { |p| gender_predictor.exec(p) }
+                .map { |p| "#{p.survival_chance > 0.7 ? 1 : 0},#{p.id}"}
+                .reduce("Survived,PassengerId") { |str, line| str + "\n" + line}
+
+File.write('data/submition.csv', csv + "\n")
